@@ -140,7 +140,7 @@ foreach ($User in $ADUsers) {
         # Re-enable disabled accounts. Passwords are left untouched.
         if (-not $existing.Enabled) {
             if ($PSCmdlet.ShouldProcess($SamAccountName, "Enable-ADAccount")) {
-                Enable-ADAccount -Identity $existing
+                Enable-ADAccount -Identity $SamAccountName
                 Write-Host "Enabled disabled account $SamAccountName" -ForegroundColor Green
                 $enableCount++
             }
@@ -183,7 +183,7 @@ foreach ($User in $ADUsers) {
 
         if ($attrChanges.Count -gt 0) {
             if ($PSCmdlet.ShouldProcess($SamAccountName, "Set-ADUser -Replace $($attrChanges.Keys -join ', ')")) {
-                Set-ADUser -Identity $existing.DistinguishedName -Replace $attrChanges
+                Set-ADUser -Identity $SamAccountName -Replace $attrChanges
                 Write-Host "Updated attributes for ${SamAccountName}: $($attrChanges.Keys -join ', ')" -ForegroundColor Green
                 $attrCount++
             }
@@ -266,8 +266,16 @@ if ($WhatIfPreference) {
 #Take a quick nap
 sleep 5
 
-#Run delta sync so enabled-state and refreshed attributes reach Entra
-Start-ADSyncSyncCycle -PolicyType delta
+#Run delta sync so enabled-state and refreshed attributes reach Entra.
+#A sync failure (e.g. access denied when not elevated) must not abort the run -
+#02/03/04 do not depend on the sync cycle.
+try {
+    Start-ADSyncSyncCycle -PolicyType delta -ErrorAction Stop
+}
+catch {
+    Write-Warning "Start-ADSyncSyncCycle failed: $($_.Exception.Message)"
+    Write-Warning "Continuing without the sync cycle - trigger a delta sync manually if needed."
+}
 
 #Readmit accounts already exist in Entra, so only a short settle delay is needed.
 Start-Sleep -Seconds 30
