@@ -61,6 +61,7 @@ $attrCount    = 0
 $enableCount  = 0
 $groupCount   = 0
 $failedCount  = 0
+$stageFailures = @()
 
 foreach ($User in $ADUsers) {
     try {
@@ -302,7 +303,13 @@ write-host "
 -
 -
 -"
-.\02-SyncPhoneAttribute.ps1 -HoursBack 1 -CsvExportPath $PhoneCsv
+try {
+    .\02-SyncPhoneAttribute.ps1 -HoursBack 1 -CsvExportPath $PhoneCsv
+}
+catch {
+    Write-Warning "02-SyncPhoneAttribute.ps1 failed: $($_.Exception.Message)"
+    $stageFailures += '02'
+}
 
 # Only import if this run produced rows
 if ((Test-Path -LiteralPath $PhoneCsv) -and @(Import-Csv -LiteralPath $PhoneCsv).Count -gt 0) {
@@ -318,10 +325,16 @@ if ((Test-Path -LiteralPath $PhoneCsv) -and @(Import-Csv -LiteralPath $PhoneCsv)
 -
 -
 -"
-    .\03-ImportEntraMethods.ps1 `
-        -CsvPath $PhoneCsv `
-        -Apply `
-        -Confirm:$false
+    try {
+        .\03-ImportEntraMethods.ps1 `
+            -CsvPath $PhoneCsv `
+            -Apply `
+            -Confirm:$false
+    }
+    catch {
+        Write-Warning "03-ImportEntraMethods.ps1 failed: $($_.Exception.Message)"
+        $stageFailures += '03'
+    }
 }
 else {
     Write-Host "No phone methods to import (02-SyncPhoneAttribute.ps1 exported no users)." -ForegroundColor Yellow
@@ -342,10 +355,21 @@ write-host "
 -
 -"
 cd C:\Account_Creation
-.\04-ProvisionJenzabar.ps1 -CsvPath $ReAdmitCsv
+try {
+    .\04-ProvisionJenzabar.ps1 -CsvPath $ReAdmitCsv
+}
+catch {
+    Write-Warning "04-ProvisionJenzabar.ps1 failed: $($_.Exception.Message)"
+    $stageFailures += '04'
+}
 
 
 Start-Sleep -Seconds 5
+
+
+if ($stageFailures.Count -gt 0) {
+    Write-Warning "Pipeline stage(s) failed: $($stageFailures -join ', ') - review the transcript above."
+}
 
 
 # End logging

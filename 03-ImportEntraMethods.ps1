@@ -94,7 +94,14 @@ if ($useAppOnly) {
             NoWelcome             = $true
             ContextScope          = 'Process'
         }
-        Connect-MgGraph @connectParameters
+        try {
+            Connect-MgGraph @connectParameters
+        }
+        catch {
+            Write-Warning "Certificate-based sign-in failed: $($_.Exception.Message)"
+            Write-Warning "The certificate thumbprint was found but its private key could not be used. This usually means the session is not elevated (run PowerShell as Administrator) or the key is unavailable to this account. Falling back to delegated authentication."
+            $useAppOnly = $false
+        }
     }
 }
 
