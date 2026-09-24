@@ -3,7 +3,10 @@
     01-CreateStudentAccounts.ps1 scheduled task.
 
     Reads NewStudentsAccounts-ReAdmit.csv and, for each row:
-        1. Looks up the existing account by SamAccountName (Given.Surname).
+        1. Looks up the existing account by employeeID (both zero-padded
+           and unpadded forms). If it matches 2+ AD accounts the row is
+           skipped and counted - resolve the duplicate manually. Falls
+           back to SamAccountName (Given.Surname) when no ID match exists.
            Missing accounts are reported to support@okwu.edu and skipped.
         2. Enables the account if it is disabled (passwords are never touched;
            students recover access through the MyOKWU forgot-password flow).
@@ -55,13 +58,14 @@ $managedGroups = @(
     "StudentGroup"
 )
 
-$missingCount = 0
-$movedCount   = 0
-$attrCount    = 0
-$enableCount  = 0
-$groupCount   = 0
-$failedCount  = 0
-$stageFailures = @()
+$missingCount   = 0
+$movedCount     = 0
+$attrCount      = 0
+$enableCount    = 0
+$groupCount     = 0
+$failedCount    = 0
+$duplicateCount = 0
+$stageFailures  = @()
 
 foreach ($User in $ADUsers) {
     try {
@@ -120,9 +124,29 @@ foreach ($User in $ADUsers) {
             $desiredGroups += "CROSSTraining"
         }
 
-        # Look up the existing account
-        $existing = Get-ADUser -Filter { SamAccountName -eq $SamAccountName } `
-            -Properties Department, extensionAttribute1, extensionAttribute2, employeeID, employeeNumber, MemberOf, Enabled
+        # Look up the existing account by employeeID first (unpadded from
+        # the CSV plus the legacy zero-padded form). Duplicate matches mean
+        # the person has more than one AD account: skip the row and leave
+        # it to support - processing one of them blindly could clobber the
+        # wrong account. Fall back to the SamAccountName convention when
+        # the CSV has no usable ID or AD has no ID match.
+        $existing = $null
+        $employeeId = "$($User.employeeID)".Trim()
+        if ($employeeId -match '^\d+$') {
+            $employeeIdPadded = '{0:D9}' -f [int]$employeeId
+            $candidates = @(Get-ADUser -Filter "EmployeeID -eq '$employeeId' -or EmployeeID -eq '$employeeIdPadded'" `
+                -Properties Department, extensionAttribute1, extensionAttribute2, employeeID, employeeNumber, MemberOf, Enabled)
+            if ($candidates.Count -gt 1) {
+                $duplicateCount++
+                Write-Host "employeeID $employeeId matches $($candidates.Count) AD accounts ($(($candidates | ForEach-Object { $_.SamAccountName }) -join ', ')) - skipping $Name. Resolve the duplicate manually." -ForegroundColor Yellow
+                continue
+            }
+            $existing = $candidates
+        }
+        if (-not $existing) {
+            $existing = Get-ADUser -Filter { SamAccountName -eq $SamAccountName } `
+                -Properties Department, extensionAttribute1, extensionAttribute2, employeeID, employeeNumber, MemberOf, Enabled
+        }
 
         if (-not $existing) {
             Write-Host "No AD account found for $SamAccountName. Sending email to Support." -ForegroundColor Yellow
@@ -137,6 +161,10 @@ foreach ($User in $ADUsers) {
             }
             continue
         }
+
+        # Every later operation targets the account we actually matched,
+        # which may differ from the Given.Surname convention.
+        $SamAccountName = $existing.SamAccountName
 
         # Re-enable disabled accounts. Passwords are left untouched.
         if (-not $existing.Enabled) {
@@ -238,7 +266,7 @@ write-host "
 -
 -
 -
-Readmit summary: $missingCount missing, $movedCount moved, $attrCount attribute updates, $enableCount enabled, $groupCount group changes, $failedCount failed.
+Readmit summary: $missingCount missing, $duplicateCount duplicates skipped, $movedCount moved, $attrCount attribute updates, $enableCount enabled, $groupCount group changes, $failedCount failed.
 -
 -
 -
