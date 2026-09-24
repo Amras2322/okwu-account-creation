@@ -42,8 +42,18 @@ ForEach ($user in $users) {
     $timeMOD = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 
     # Cross reference Active Directory to make sure the account is created.
-    $adlook = Get-ADUser -Filter "GivenName -eq '$GivenName' -and Surname -eq '$Surname' -and EmployeeID -eq '$Id_Num'" -Properties *
-    $adlookup = Get-ADUser -Filter "GivenName -eq '$GivenName' -and Surname -eq '$Surname' -and EmployeeID -eq '$Id_num'" -Properties SamAccountName, UserPrincipalName
+    # Match on employeeID first (unpadded from the CSV plus the legacy
+    # zero-padded form) so differing name spellings cannot hide a match;
+    # fall back to the name+ID filter when no ID match exists.
+    $Id_pad = if ("$Id_num" -match '^\d+$') { '{0:D9}' -f [int]$Id_num } else { $null }
+    $adlook = @()
+    if ("$Id_num" -match '^\d+$') {
+        $adlook = @(Get-ADUser -Filter "EmployeeID -eq '$Id_num' -or EmployeeID -eq '$Id_pad'" -Properties *)
+    }
+    if ($adlook.Count -eq 0) {
+        $adlook = @(Get-ADUser -Filter "GivenName -eq '$GivenName' -and Surname -eq '$Surname' -and EmployeeID -eq '$Id_num'" -Properties *)
+    }
+    $adlookup = $adlook
     $adUsername = $adlook.SamAccountName
     $okwuEmail = $adlook.UserPrincipalName
     $ADou = $adlook.DistinguishedName
@@ -56,7 +66,7 @@ ForEach ($user in $users) {
     $UserName = "'$UserName0'"
 
     # If Commands to check if AD value is empty, duplicate, or single
-    if ($adlookup -eq $null) {
+    if ($adlook.Count -eq 0) {
         Write-host "User does not exist in AD $CSVUsername. Sending email to Support."
         Write-host "-"
         Write-host "-------------------------------------------------------------------------------------------------"
