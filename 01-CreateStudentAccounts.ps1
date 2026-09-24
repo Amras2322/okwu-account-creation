@@ -323,7 +323,7 @@ cd C:\Account_Creation
 # Delete old log files
 
 
-# Set the directory path where you want to delete files older than 30 days
+# Set the directory path where you want to delete old files
 $target_folder = Join-Path -Path $PSScriptRoot -ChildPath "Logs"
 
 
@@ -335,9 +335,14 @@ $threshold_date = (Get-Date).AddDays(-$days_old)
 Get-ChildItem -Path $target_folder -Recurse | Where-Object {
     $_.LastWriteTime -lt $threshold_date
 } | ForEach-Object {
-    # Remove the file
-    Remove-Item $_.FullName -Force
-    Write-Host "Deleted: $($_.FullName)"
+    # Remove the file; a locked file (e.g. an open transcript) is skipped and retried next run
+    Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue -ErrorVariable deleteErrors
+    if ($deleteErrors) {
+        Write-Host "Skipped (in use): $($_.FullName)" -ForegroundColor Yellow
+    }
+    else {
+        Write-Host "Deleted: $($_.FullName)"
+    }
 }
 
 
