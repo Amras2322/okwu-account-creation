@@ -1,8 +1,13 @@
-﻿Import-Module PSFramework
+﻿param(
+    [Parameter(Mandatory = $false)]
+    [string]$CsvPath = "C:\Account_Creation\NewStudentsAccounts-auto.csv"
+)
+
+Import-Module PSFramework
 
 Import-Module SqlServer
 
-$users = Import-Csv -Path "C:\Account_Creation\NewStudentsAccounts-auto.csv"
+$users = Import-Csv -Path $CsvPath
 
 $serverName = "jzowo-sql1.owo.jaas"
 $databaseName = "J1PRD"
@@ -81,6 +86,7 @@ ForEach ($user in $users) {
         # Creating the INSERT query using the variables defined
         ## Adding OKWU Email to alternate contact
         $SQLQuery3 = "
+        IF NOT EXISTS (SELECT 1 FROM AlternateContactMethod WHERE namemasterappid = '$NameMasterAppID' AND AlternateContact = '$okwuEmail')
         INSERT INTO AlternateContactMethod (namemasterappid, AlternateContact, AlternateContactTypeDefAppID, ID_NUM, ADDR_CDE, INSTITUTION_EMAIL, NOTIFICATION_ENABLED)
         VALUES ('$NameMasterAppID', '$okwuEmail', '-1', '$Id_num', '*EML', 'Y', 'Y')
         "
@@ -118,12 +124,14 @@ ForEach ($user in $users) {
         # Updating TW Web Tables                                             #
 
         $SQLQuery1 = "
+        IF NOT EXISTS (SELECT 1 FROM TW_WEB_SECURITY WHERE ID_NUM = '$Id_num')
         INSERT INTO TW_WEB_SECURITY (ID_NUM, ACCESS_CDE, WEB_LOGIN)
         VALUES ('$Id_num', '1234', '$okwuEmail')
         "
 
         # SQLQuery2 Created to Web Security
         $SQLQuery2 = "
+        IF NOT EXISTS (SELECT 1 FROM TW_GRP_MEMBERSHIP WHERE ID_NUM = '$Id_num' AND Group_id = 'student')
         INSERT INTO TW_GRP_MEMBERSHIP (ID_NUM, Group_id)
         VALUES ('$Id_num', 'student')
         "
