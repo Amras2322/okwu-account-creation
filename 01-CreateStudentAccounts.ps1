@@ -161,7 +161,7 @@ foreach ($User in $ADUsers) {
                 ExistingDN     = (($idMatches | ForEach-Object { $_.DistinguishedName }) -join '; ')
                 Reason         = "employeeID $csvEmployeeId matches $($idMatches.Count) AD accounts"
             })
-            Write-Host "employeeID $csvEmployeeId matches $($idMatches.Count) AD accounts ($(($idMatches | ForEach-Object { $_.SamAccountName }) -join ', ')) - skipping $BaseName. See the collision report." -ForegroundColor Yellow
+            Write-Host "employeeID $csvEmployeeId matches $($idMatches.Count) AD accounts ($(($idMatches | ForEach-Object { $_.SamAccountName }) -join ', ')) - skipping $BaseName." -ForegroundColor Yellow
             continue
         }
 
@@ -174,7 +174,7 @@ foreach ($User in $ADUsers) {
                 ExistingDN     = $existing.DistinguishedName
                 Enabled        = $existing.Enabled
             })
-            Write-Host "employeeID $csvEmployeeId already has account $($existing.SamAccountName) ($($existing.DistinguishedName)) - same student, not creating a duplicate. See the collision report." -ForegroundColor Yellow
+            Write-Host "employeeID $csvEmployeeId already has account $($existing.SamAccountName) ($($existing.DistinguishedName)) - same student, not creating a duplicate." -ForegroundColor Yellow
             continue
         }
 
@@ -194,7 +194,7 @@ foreach ($User in $ADUsers) {
                     ExistingDN     = $existingHolder.DistinguishedName
                     Reason         = "existing account has no employeeID/employeeNumber to compare"
                 })
-                Write-Host "Cannot tell whether $BaseSamAccountName ($($existingHolder.DistinguishedName)) is the same student as $BaseName - it has no employeeID. Skipping this row; see the collision report." -ForegroundColor Yellow
+                Write-Host "Cannot tell whether $BaseSamAccountName ($($existingHolder.DistinguishedName)) is the same student as $BaseName - it has no employeeID. Skipping this row." -ForegroundColor Yellow
                 continue
             }
 
@@ -273,7 +273,7 @@ foreach ($User in $ADUsers) {
                 ExistingDN     = $raceHolder.DistinguishedName
                 Reason         = "username became unavailable during this run"
             })
-            Write-Host "A user with username $SamAccountName already exists in Active Directory - skipping this row; see the collision report." -ForegroundColor Yellow
+            Write-Host "A user with username $SamAccountName already exists in Active Directory - skipping this row." -ForegroundColor Yellow
         }
         else {
             # Create the new user account
@@ -342,50 +342,25 @@ foreach ($User in $ADUsers) {
 
 
 
-# Report username collisions so none of them are silently dropped.
+# Summary for the transcript log. No email: a numbered username is an expected
+# outcome, not an incident.
 if ($collisions.Count -gt 0 -or $readmitCandidates.Count -gt 0 -or $reviewCandidates.Count -gt 0) {
-    $bodyLines = @()
-    $bodyLines += "Username collision report from 01-CreateStudentAccounts.ps1"
-    $bodyLines += "Run: $(Get-Date -Format 'yyyy-MM-dd HH:mm')"
-    $bodyLines += ""
+    Write-Host ""
+    Write-Host "Username collisions this run: $($collisions.Count) created with a numbered username, $($readmitCandidates.Count) already had an account, $($reviewCandidates.Count) skipped for manual review." -ForegroundColor Cyan
 
     if ($collisions.Count -gt 0) {
-        $bodyLines += "SUFFIXED - a different student already owns the base username. These accounts were created with a numeric suffix:"
-        foreach ($c in $collisions) {
-            $bodyLines += " - $($c.Name) (employeeID $($c.CSVEmployeeID)): $($c.BaseUsername) belongs to employeeID $($c.ExistingID) at $($c.ExistingDN). Created as $($c.AssignedUsername)."
-        }
-        $bodyLines += ""
+        Write-Host "  Numbered usernames (base name held by a different student):" -ForegroundColor Cyan
+        $collisions | Format-Table Name, CSVEmployeeID, BaseUsername, AssignedUsername, ExistingID, ExistingDN -AutoSize | Out-String | Write-Host
     }
 
     if ($readmitCandidates.Count -gt 0) {
-        $bodyLines += "NOT CREATED - the same student (matching employeeID) already has an account. If this student is returning, the row belongs in NewStudentsAccounts-ReAdmit.csv so 05-ReAdmitAccounts.ps1 can reactivate it:"
-        foreach ($r in $readmitCandidates) {
-            $bodyLines += " - $($r.Name) (employeeID $($r.EmployeeID)): existing account $($r.SamAccountName) at $($r.ExistingDN), Enabled=$($r.Enabled)."
-        }
-        $bodyLines += ""
+        Write-Host "  Already had an account, no duplicate created (returning students go through NewStudentsAccounts-ReAdmit.csv):" -ForegroundColor Yellow
+        $readmitCandidates | Format-Table Name, EmployeeID, SamAccountName, Enabled, ExistingDN -AutoSize | Out-String | Write-Host
     }
 
     if ($reviewCandidates.Count -gt 0) {
-        $bodyLines += "NOT CREATED - needs manual review:"
-        foreach ($v in $reviewCandidates) {
-            $bodyLines += " - $($v.Name) (CSV employeeID '$($v.CSVEmployeeID)'): $($v.Reason). Existing: $($v.SamAccountName) at $($v.ExistingDN)."
-        }
-        $bodyLines += ""
-    }
-
-    Write-Host ($bodyLines -join "`n") -ForegroundColor Cyan
-
-    try {
-        Send-MailMessage `
-            -To "support@okwu.edu" `
-            -From "accounts@okwu.edu" `
-            -Subject "Username collisions in student account creation ($($collisions.Count) suffixed, $($readmitCandidates.Count) readmit, $($reviewCandidates.Count) review)" `
-            -Body ($bodyLines -join "`n") `
-            -SmtpServer "10.0.5.16"
-        Write-Host "Collision report emailed to support@okwu.edu" -ForegroundColor Cyan
-    }
-    catch {
-        Write-Warning "Failed to send collision report email: $($_.Exception.Message)"
+        Write-Host "  Skipped, needs manual review:" -ForegroundColor Yellow
+        $reviewCandidates | Format-Table Name, CSVEmployeeID, SamAccountName, Reason, ExistingDN -AutoSize | Out-String | Write-Host
     }
 }
 
